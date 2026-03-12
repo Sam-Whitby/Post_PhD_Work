@@ -60,17 +60,22 @@ def plot_coupling_matrices(J_matrix: np.ndarray,
     }
 
     vmax = np.max(np.abs(J_matrix)) or 1.0
+
+    # NaN is used for "outside this distance category" – map it to white so
+    # it is indistinguishable from J=0 and the plot shows exactly two colours.
+    cmap = plt.cm.RdBu_r.copy()
+    cmap.set_bad(color="white")
+
     fig, axes = plt.subplots(1, 4, figsize=(16, 4))
     fig.suptitle(
-        "Coupling matrix $J[k_1,k_2]$ by initial monomer separation\n"
-        "(white = outside this distance category)",
+        "Coupling matrix $J[k_1,k_2]$ by initial monomer separation",
         fontsize=11,
     )
 
     for ax, (label, mask) in zip(axes, masks.items()):
         J_masked = np.where(mask, J_matrix, np.nan)
         im = ax.imshow(
-            J_masked, cmap="RdBu_r",
+            J_masked, cmap=cmap,
             vmin=-vmax, vmax=vmax,
             interpolation="nearest", aspect="auto",
         )
@@ -110,24 +115,33 @@ def animate_combined(sim: PolymerKawasaki,
     ax_en  = fig.add_subplot(1, 2, 2)
 
     # ── Lattice panel ─────────────────────────────────────────────────────
-    img = ax_lat.imshow(
-        sim.lattice, cmap="viridis",
-        vmin=0, vmax=N - 1,
-        interpolation="nearest", origin="upper",
-    )
-    ax_lat.set_title("Lattice  (colour = monomer index)", fontsize=11, pad=6)
+    ax_lat.set_facecolor("#f0f0f0")
+    ax_lat.set_xlim(-0.6, L - 0.4)
+    ax_lat.set_ylim(L - 0.4, -0.6)   # y increases downward to match row indexing
+    ax_lat.set_aspect("equal")
     ax_lat.set_xticks(np.arange(L))
     ax_lat.set_yticks(np.arange(L))
     ax_lat.tick_params(labelsize=7)
-    plt.colorbar(img, ax=ax_lat, label="Monomer index", shrink=0.75)
+    ax_lat.set_title("Polymer backbone  (colour = monomer index)", fontsize=11, pad=6)
 
-    # Backbone path as a LineCollection coloured by position along chain
+    # Backbone bonds as a LineCollection coloured along the chain
     rows, cols = sim.get_backbone_coords()
-    pts = np.column_stack([cols.astype(float), rows.astype(float)])
-    segments = np.stack([pts[:-1], pts[1:]], axis=1)
+    pts       = np.column_stack([cols.astype(float), rows.astype(float)])
+    segments  = np.stack([pts[:-1], pts[1:]], axis=1)
     seg_colors = plt.cm.plasma(np.linspace(0, 1, N - 1))
-    lc = LineCollection(segments, colors=seg_colors, linewidths=1.8, zorder=2)
+    lc = LineCollection(segments, colors=seg_colors, linewidths=2.5, zorder=2)
     ax_lat.add_collection(lc)
+
+    # Monomer circles: position fixed at grid sites, colour = monomer index
+    site_rows = np.repeat(np.arange(L), L).astype(float)
+    site_cols = np.tile(np.arange(L), L).astype(float)
+    sc = ax_lat.scatter(
+        site_cols, site_rows,
+        c=sim.lattice.ravel(), cmap="plasma",
+        vmin=0, vmax=N - 1,
+        s=260, zorder=3, linewidths=0.6, edgecolors="k",
+    )
+    plt.colorbar(sc, ax=ax_lat, label="Monomer index", shrink=0.75)
 
     # Sweep counter below the lattice
     sweep_text = ax_lat.text(
@@ -151,10 +165,10 @@ def animate_combined(sim: PolymerKawasaki,
         sweep_history.append(sim.sweep)
         energy_history.append(sim.energy() / N)
 
-        # Update lattice image
-        img.set_data(sim.lattice)
+        # Update monomer circle colours
+        sc.set_array(sim.lattice.ravel().astype(float))
 
-        # Update backbone path
+        # Update backbone bond segments
         r, c = sim.get_backbone_coords()
         new_pts  = np.column_stack([c.astype(float), r.astype(float)])
         new_segs = np.stack([new_pts[:-1], new_pts[1:]], axis=1)
