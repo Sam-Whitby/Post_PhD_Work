@@ -68,12 +68,6 @@ def animate_combined(sim: KawasakiLatticeGas,
     ax_en.tick_params(labelsize=9)
     (line,) = ax_en.plot(sweep_history, energy_history, lw=1.2, color="steelblue")
 
-    # Give the energy axis a small initial y-range so it doesn't collapse
-    e0 = energy_history[0]
-    ax_en.set_ylim(e0 * 1.1 if e0 < 0 else e0 * 0.9,
-                   e0 * 0.9 if e0 < 0 else e0 * 1.1)
-    ax_en.set_xlim(0, n_frames * sweeps_per_frame)
-
     # ── Update function ────────────────────────────────────────────────
     def update(frame):
         for _ in range(sweeps_per_frame):
@@ -87,8 +81,11 @@ def animate_combined(sim: KawasakiLatticeGas,
 
         line.set_xdata(sweep_history)
         line.set_ydata(energy_history)
-        ax_en.relim()
-        ax_en.autoscale_view()
+
+        ax_en.set_xlim(sweep_history[0], sweep_history[-1] + 1)
+        ymin, ymax = min(energy_history), max(energy_history)
+        margin = abs(ymax - ymin) * 0.1 if ymax != ymin else 0.5
+        ax_en.set_ylim(ymin - margin, ymax + margin)
 
     ani = animation.FuncAnimation(
         fig, update, frames=n_frames, interval=60, blit=False
