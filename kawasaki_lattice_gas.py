@@ -7,11 +7,13 @@ differ (one occupied, one empty) a swap is attempted and accepted via the
 Metropolis criterion.
 
 Hamiltonian:  H = -J * sum_{<i,j>} n_i * n_j
-where n_i = 1 (occupied) or 0 (empty) and the sum runs over nearest-neighbour
-pairs on a periodic square lattice.
+where n_i = 1 (occupied) or 0 (empty) and the sum runs over all 8 neighbours
+(Moore neighbourhood) on a periodic square lattice.
 
 Positive J favours clustering (phase separation at low T).
 """
+
+from typing import Optional
 
 import numpy as np
 
@@ -20,7 +22,7 @@ class KawasakiLatticeGas:
     """2D lattice gas with Kawasaki (conserved) dynamics."""
 
     def __init__(self, L: int, density: float, J: float = 1.0, T: float = 2.0,
-                 seed: int | None = None):
+                 seed: Optional[int] = None):
         """
         Parameters
         ----------
@@ -55,11 +57,21 @@ class KawasakiLatticeGas:
     # ------------------------------------------------------------------
 
     def energy(self) -> float:
-        """Total lattice energy (vectorised, no double-counting)."""
+        """Total lattice energy (vectorised, no double-counting).
+
+        Sums over the 4 unique bond directions that tile the 8-neighbour
+        (Moore) lattice without double-counting:
+          axis-0 shift  → vertical bonds
+          axis-1 shift  → horizontal bonds
+          (+1,+1) shift → one diagonal family
+          (+1,-1) shift → other diagonal family
+        """
         lat = self.lattice
         e = -self.J * (
-            np.sum(lat * np.roll(lat, 1, axis=0)) +   # vertical bonds
-            np.sum(lat * np.roll(lat, 1, axis=1))      # horizontal bonds
+            np.sum(lat * np.roll(lat, 1, axis=0)) +                          # vertical
+            np.sum(lat * np.roll(lat, 1, axis=1)) +                          # horizontal
+            np.sum(lat * np.roll(np.roll(lat, 1, axis=0), 1, axis=1)) +     # diagonal ↘
+            np.sum(lat * np.roll(np.roll(lat, 1, axis=0), -1, axis=1))      # diagonal ↙
         )
         return float(e)
 
@@ -98,14 +110,26 @@ class KawasakiLatticeGas:
         if n1 == n2:
             return 0.0
 
-        # Neighbours of site 1, excluding site 2
-        s1 = (int(lat[(i1 - 1) % L, j1]) + int(lat[(i1 + 1) % L, j1]) +
-              int(lat[i1, (j1 - 1) % L]) + int(lat[i1, (j1 + 1) % L]) -
+        # All 8 Moore neighbours of site 1, then subtract site 2's contribution
+        s1 = (int(lat[(i1 - 1) % L, (j1 - 1) % L]) +
+              int(lat[(i1 - 1) % L,  j1             ]) +
+              int(lat[(i1 - 1) % L, (j1 + 1) % L]) +
+              int(lat[ i1,           (j1 - 1) % L]) +
+              int(lat[ i1,           (j1 + 1) % L]) +
+              int(lat[(i1 + 1) % L, (j1 - 1) % L]) +
+              int(lat[(i1 + 1) % L,  j1             ]) +
+              int(lat[(i1 + 1) % L, (j1 + 1) % L]) -
               n2)
 
-        # Neighbours of site 2, excluding site 1
-        s2 = (int(lat[(i2 - 1) % L, j2]) + int(lat[(i2 + 1) % L, j2]) +
-              int(lat[i2, (j2 - 1) % L]) + int(lat[i2, (j2 + 1) % L]) -
+        # All 8 Moore neighbours of site 2, then subtract site 1's contribution
+        s2 = (int(lat[(i2 - 1) % L, (j2 - 1) % L]) +
+              int(lat[(i2 - 1) % L,  j2             ]) +
+              int(lat[(i2 - 1) % L, (j2 + 1) % L]) +
+              int(lat[ i2,           (j2 - 1) % L]) +
+              int(lat[ i2,           (j2 + 1) % L]) +
+              int(lat[(i2 + 1) % L, (j2 - 1) % L]) +
+              int(lat[(i2 + 1) % L,  j2             ]) +
+              int(lat[(i2 + 1) % L, (j2 + 1) % L]) -
               n1)
 
         return self.J * (n1 - n2) * (s1 - s2)
@@ -129,16 +153,12 @@ class KawasakiLatticeGas:
             i1 = int(rng.integers(L))
             j1 = int(rng.integers(L))
 
-            # Random nearest neighbour (0=up, 1=down, 2=left, 3=right)
-            d = int(rng.integers(4))
-            if d == 0:
-                i2, j2 = (i1 - 1) % L, j1
-            elif d == 1:
-                i2, j2 = (i1 + 1) % L, j1
-            elif d == 2:
-                i2, j2 = i1, (j1 - 1) % L
-            else:
-                i2, j2 = i1, (j1 + 1) % L
+            # Random neighbour from all 8 Moore directions
+            # (di, dj) offsets: N, S, W, E, NW, NE, SW, SE
+            d = int(rng.integers(8))
+            di = (-1, 1, 0, 0, -1, -1, 1,  1)[d]
+            dj = ( 0, 0,-1, 1, -1,  1,-1,  1)[d]
+            i2, j2 = (i1 + di) % L, (j1 + dj) % L
 
             # Skip if both sites are the same type
             if lat[i1, j1] == lat[i2, j2]:
