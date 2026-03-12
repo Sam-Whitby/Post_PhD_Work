@@ -3,12 +3,27 @@ Run a Kawasaki lattice-gas simulation and visualise the results.
 
 Usage
 -----
-    python run_kawasaki.py
+    python run_kawasaki.py [options]
+
+    --L               INT    lattice size L×L (default: 64)
+    --density         FLOAT  fraction of occupied sites (default: 0.4)
+    --J               FLOAT  coupling constant (default: 1.0)
+    --T               FLOAT  temperature (default: 1.5)
+    --seed            INT    random seed (default: 42)
+    --frames          INT    number of animation frames (default: 300)
+    --sweeps-per-frame INT   MC sweeps between frames (default: 3)
+
+Examples
+--------
+    python run_kawasaki.py --T 2.5 --density 0.3
+    python run_kawasaki.py --L 32 --J 2.0 --T 1.0
 
 Produces:
   - A combined animation: lattice image on the left, live energy plot on the right
   - A static plot of the structure factor after the run
 """
+
+import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -112,15 +127,26 @@ def plot_structure_factor(sim: KawasakiLatticeGas) -> None:
 
 
 def main():
-    print(f"Initialising {L}×{L} lattice gas  "
-          f"(density={DENSITY}, J={J}, T={T}, init=circle)")
+    parser = argparse.ArgumentParser(description="Kawasaki lattice-gas simulation")
+    parser.add_argument("--L",                type=int,   default=L,               help="lattice size")
+    parser.add_argument("--density",          type=float, default=DENSITY,          help="fraction of occupied sites")
+    parser.add_argument("--J",                type=float, default=J,                help="coupling constant")
+    parser.add_argument("--T",                type=float, default=T,                help="temperature")
+    parser.add_argument("--seed",             type=int,   default=SEED,             help="random seed")
+    parser.add_argument("--frames",           type=int,   default=N_FRAMES,         help="animation frames")
+    parser.add_argument("--sweeps-per-frame", type=int,   default=SWEEPS_PER_FRAME, help="MC sweeps between frames")
+    args = parser.parse_args()
 
-    sim = KawasakiLatticeGas(L=L, density=DENSITY, J=J, T=T, seed=SEED,
-                             init="circle")
+    print(f"Initialising {args.L}×{args.L} lattice gas  "
+          f"(density={args.density}, J={args.J}, T={args.T}, init=circle)")
+
+    sim = KawasakiLatticeGas(L=args.L, density=args.density, J=args.J, T=args.T,
+                             seed=args.seed, init="circle")
 
     print("Showing combined animation (lattice + energy)…  "
           "close the window to continue.")
-    ani = animate_combined(sim)   # keep reference so GC doesn't collect it
+    ani = animate_combined(sim, n_frames=args.frames,
+                           sweeps_per_frame=args.sweeps_per_frame)
 
     plot_structure_factor(sim)
 

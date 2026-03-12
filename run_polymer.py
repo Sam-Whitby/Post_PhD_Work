@@ -3,7 +3,20 @@ Run the lattice-polymer Kawasaki simulation and visualise it.
 
 Usage
 -----
-    python run_polymer.py
+    python run_polymer.py [options]
+
+    --L              INT    lattice side length, must be power of 2 (default: 8)
+    --J              FLOAT  backbone coupling strength (default: 1.0)
+    --T              FLOAT  temperature in units of k_B (default: 1.0)
+    --K              FLOAT  harmonic spring constant for backbone bonds (default: 10.0)
+    --seed           INT    random seed (default: 42)
+    --frames         INT    number of animation frames (default: 300)
+    --sweeps-per-frame INT  MC sweeps between frames (default: 2)
+
+Examples
+--------
+    python run_polymer.py --T 2.0 --K 5.0
+    python run_polymer.py --L 16 --K 0 --T 0.5
 
 Produces:
   1. Coupling-matrix panel  – shows J[k1,k2] for monomer pairs at
@@ -11,6 +24,8 @@ Produces:
   2. Combined animation     – left: lattice with backbone path overlaid,
                               right: live energy-vs-sweep plot.
 """
+
+import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -243,12 +258,30 @@ def animate_combined(sim: PolymerKawasaki,
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    N = L * L
-    print(f"Lattice: {L}×{L}  ({N} monomers)")
-    print(f"T = {T},  J_backbone = {J_BACKBONE},  K = {K}")
+    parser = argparse.ArgumentParser(description="Lattice-polymer Kawasaki simulation")
+    parser.add_argument("--L",                type=int,   default=L,                help="lattice side length (power of 2)")
+    parser.add_argument("--J",                type=float, default=J_BACKBONE,        help="backbone coupling strength")
+    parser.add_argument("--T",                type=float, default=T,                 help="temperature")
+    parser.add_argument("--K",                type=float, default=K,                 help="harmonic spring constant")
+    parser.add_argument("--seed",             type=int,   default=SEED,              help="random seed")
+    parser.add_argument("--frames",           type=int,   default=N_FRAMES,          help="animation frames")
+    parser.add_argument("--sweeps-per-frame", type=int,   default=SWEEPS_PER_FRAME,  help="MC sweeps between frames")
+    args = parser.parse_args()
 
-    J_matrix = backbone_coupling_matrix(N, J=J_BACKBONE)
-    moore_coords = generate_moore_curve(order=round(np.log2(L)))
+    L_       = args.L
+    J_val    = args.J
+    T_       = args.T
+    K_       = args.K
+    seed_    = args.seed
+    frames_  = args.frames
+    spf_     = args.sweeps_per_frame
+
+    N = L_ * L_
+    print(f"Lattice: {L_}×{L_}  ({N} monomers)")
+    print(f"T = {T_},  J_backbone = {J_val},  K = {K_}")
+
+    J_matrix = backbone_coupling_matrix(N, J=J_val)
+    moore_coords = generate_moore_curve(order=round(np.log2(L_)))
 
     print(f"\nMoore curve spans rows 0–{max(r for r,c in moore_coords)}, "
           f"cols 0–{max(c for r,c in moore_coords)}")
@@ -260,14 +293,14 @@ def main() -> None:
     plot_coupling_matrices(J_matrix, moore_coords)
 
     # ── Run simulation ────────────────────────────────────────────────────
-    sim = PolymerKawasaki(L=L, J_matrix=J_matrix, T=T, seed=SEED,
-                          init="moore", K=K)
+    sim = PolymerKawasaki(L=L_, J_matrix=J_matrix, T=T_, seed=seed_,
+                          init="moore", K=K_)
 
     E0 = sim.energy()
     print(f"\nInitial energy: {E0:.2f}")
 
     print("\nStarting animation …  (close the window to exit)")
-    ani = animate_combined(sim)   # keep reference – prevents GC
+    ani = animate_combined(sim, n_frames=frames_, sweeps_per_frame=spf_)
 
 
 if __name__ == "__main__":
