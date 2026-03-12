@@ -7,6 +7,8 @@ Usage
 
     --L              INT    lattice side length, must be power of 2 (default: 8)
     --J              FLOAT  backbone coupling strength (default: 1.0)
+    --E1             FLOAT  attraction for non-backbone orthogonal contacts (default: 0.0)
+    --E2             FLOAT  attraction for non-backbone diagonal contacts (default: 0.0)
     --T              FLOAT  temperature in units of k_B (default: 1.0)
     --K              FLOAT  harmonic spring constant for backbone bonds (default: 10.0)
     --seed           INT    random seed (default: 42)
@@ -17,6 +19,7 @@ Examples
 --------
     python run_polymer.py --T 2.0 --K 5.0
     python run_polymer.py --L 16 --K 0 --T 0.5
+    python run_polymer.py --E1 0.5 --E2 0.25 --K 10
 
 Produces:
   1. Coupling-matrix panel  – shows J[k1,k2] for monomer pairs at
@@ -35,6 +38,7 @@ from matplotlib.collections import LineCollection
 from polymer_kawasaki import (
     PolymerKawasaki,
     backbone_coupling_matrix,
+    moore_contact_matrix,
     generate_moore_curve,
     initial_distance_matrix,
 )
@@ -43,6 +47,8 @@ from polymer_kawasaki import (
 # ── Parameters ────────────────────────────────────────────────────────────────
 L                = 8      # lattice side (must be power of 2)
 J_BACKBONE       = 1.0    # coupling strength along the backbone
+E1               = 0.0    # attraction for non-backbone orthogonal contacts (dist=1)
+E2               = 0.0    # attraction for non-backbone diagonal contacts  (dist=√2)
 T                = 1.0    # temperature in units of k_B
 SEED             = 42
 K                = 10.0   # harmonic spring constant for backbone bonds (V = K * dist²)
@@ -261,6 +267,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Lattice-polymer Kawasaki simulation")
     parser.add_argument("--L",                type=int,   default=L,                help="lattice side length (power of 2)")
     parser.add_argument("--J",                type=float, default=J_BACKBONE,        help="backbone coupling strength")
+    parser.add_argument("--E1",               type=float, default=E1,                help="non-backbone orthogonal contact strength (dist=1)")
+    parser.add_argument("--E2",               type=float, default=E2,                help="non-backbone diagonal contact strength (dist=√2)")
     parser.add_argument("--T",                type=float, default=T,                 help="temperature")
     parser.add_argument("--K",                type=float, default=K,                 help="harmonic spring constant")
     parser.add_argument("--seed",             type=int,   default=SEED,              help="random seed")
@@ -270,6 +278,8 @@ def main() -> None:
 
     L_       = args.L
     J_val    = args.J
+    E1_      = args.E1
+    E2_      = args.E2
     T_       = args.T
     K_       = args.K
     seed_    = args.seed
@@ -278,10 +288,10 @@ def main() -> None:
 
     N = L_ * L_
     print(f"Lattice: {L_}×{L_}  ({N} monomers)")
-    print(f"T = {T_},  J_backbone = {J_val},  K = {K_}")
+    print(f"T = {T_},  J = {J_val},  E1 = {E1_},  E2 = {E2_},  K = {K_}")
 
-    J_matrix = backbone_coupling_matrix(N, J=J_val)
     moore_coords = generate_moore_curve(order=round(np.log2(L_)))
+    J_matrix = moore_contact_matrix(moore_coords, J=J_val, E1=E1_, E2=E2_)
 
     print(f"\nMoore curve spans rows 0–{max(r for r,c in moore_coords)}, "
           f"cols 0–{max(c for r,c in moore_coords)}")

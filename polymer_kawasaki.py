@@ -101,6 +101,58 @@ def backbone_coupling_matrix(N: int, J: float = 1.0) -> np.ndarray:
     return J_mat
 
 
+def moore_contact_matrix(
+    moore_coords: list[tuple[int, int]],
+    J: float = 1.0,
+    E1: float = 0.5,
+    E2: float = 0.25,
+) -> np.ndarray:
+    """
+    Return an N×N coupling matrix built from the Moore-curve ground-state geometry.
+
+    Three classes of monomer pairs:
+
+    1. Backbone bonds  |k1 - k2| = 1          → J_matrix[k1,k2] = J
+       (consecutive monomers along the chain)
+
+    2. Spatial contacts at distance 1          → J_matrix[k1,k2] = E1
+       (non-backbone pairs that are orthogonal lattice neighbours in the
+        Moore-curve configuration)
+
+    3. Spatial contacts at distance √2         → J_matrix[k1,k2] = E2
+       (non-backbone pairs that are diagonal lattice neighbours in the
+        Moore-curve configuration)
+
+    All other pairs have zero coupling.
+
+    In the lowest-energy (Moore curve) conformation every backbone bond is at
+    distance 1, so those pairs are already captured by class 1.  Classes 2 and 3
+    encode the additional attraction between monomers that happen to sit next to
+    each other in the ground state but are not bonded along the backbone.
+    Setting E1 = E2 = 0 recovers the plain backbone-only matrix.
+    """
+    N = len(moore_coords)
+    J_mat = np.zeros((N, N))
+    coords = np.array(moore_coords, dtype=float)
+    tol = 1e-9
+
+    for k1 in range(N):
+        for k2 in range(k1 + 1, N):
+            dist = float(np.sqrt(np.sum((coords[k1] - coords[k2]) ** 2)))
+            if abs(k1 - k2) == 1:
+                val = J                                 # backbone bond
+            elif abs(dist - 1.0) < tol:
+                val = E1                                # orthogonal contact
+            elif abs(dist - np.sqrt(2)) < tol:
+                val = E2                                # diagonal contact
+            else:
+                continue
+            J_mat[k1, k2] = val
+            J_mat[k2, k1] = val
+
+    return J_mat
+
+
 def initial_distance_matrix(moore_coords: list[tuple[int, int]]) -> np.ndarray:
     """
     Return the N×N matrix of Euclidean distances between all monomer pairs
