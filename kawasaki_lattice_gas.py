@@ -22,7 +22,7 @@ class KawasakiLatticeGas:
     """2D lattice gas with Kawasaki (conserved) dynamics."""
 
     def __init__(self, L: int, density: float, J: float = 1.0, T: float = 2.0,
-                 seed: Optional[int] = None):
+                 seed: Optional[int] = None, init: str = "circle"):
         """
         Parameters
         ----------
@@ -31,9 +31,13 @@ class KawasakiLatticeGas:
         J       : coupling constant  (J > 0  → attractive interactions)
         T       : temperature in units of J/k_B
         seed    : random seed for reproducibility
+        init    : initial condition — 'circle' (condensed disk at centre)
+                  or 'random' (uniform random)
         """
         if not 0 < density < 1:
             raise ValueError("density must be between 0 and 1 (exclusive)")
+        if init not in ("circle", "random"):
+            raise ValueError("init must be 'circle' or 'random'")
 
         self.L = L
         self.J = J
@@ -42,12 +46,23 @@ class KawasakiLatticeGas:
 
         self.rng = np.random.default_rng(seed)
 
-        # Initialise lattice with the requested density
         n_particles = round(density * L * L)
-        flat = np.zeros(L * L, dtype=np.int8)
-        flat[:n_particles] = 1
-        self.rng.shuffle(flat)
-        self.lattice = flat.reshape(L, L)
+
+        if init == "circle":
+            # Fill the n_particles sites closest to the lattice centre,
+            # giving a compact disk as the starting configuration.
+            cx, cy = (L - 1) / 2.0, (L - 1) / 2.0
+            ii, jj = np.meshgrid(np.arange(L), np.arange(L), indexing="ij")
+            dist2 = (ii - cx) ** 2 + (jj - cy) ** 2
+            order = np.argsort(dist2.ravel())
+            flat = np.zeros(L * L, dtype=np.int8)
+            flat[order[:n_particles]] = 1
+            self.lattice = flat.reshape(L, L)
+        else:
+            flat = np.zeros(L * L, dtype=np.int8)
+            flat[:n_particles] = 1
+            self.rng.shuffle(flat)
+            self.lattice = flat.reshape(L, L)
 
         self.n_particles = n_particles
         self.sweep = 0          # number of completed MC sweeps
