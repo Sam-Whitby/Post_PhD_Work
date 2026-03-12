@@ -92,6 +92,53 @@ def plot_coupling_matrices(J_matrix: np.ndarray,
     plt.show()
 
 
+# ── Periodic bond segments ────────────────────────────────────────────────────
+
+def _bond_segments_periodic(rows: np.ndarray, cols: np.ndarray,
+                             L: int) -> np.ndarray:
+    """
+    Build a (2*(N-1), 2, 2) segment array for backbone bonds on a periodic
+    lattice, handling boundary wrapping correctly.
+
+    For each bond k → k+1:
+    - If it does NOT cross a boundary: one normal segment + one degenerate
+      (zero-length) placeholder.
+    - If it DOES cross a boundary: two half-segments, each exiting at the
+      boundary midpoint (0.5 units past the edge), so no line spans the
+      full plot width/height.
+
+    The total segment count is always 2*(N-1), keeping set_segments() happy.
+    Axes convention: x = col, y = row.
+    """
+    N = len(rows)
+    segs = np.empty((2 * (N - 1), 2, 2), dtype=float)
+
+    for k in range(N - 1):
+        x1, y1 = float(cols[k]),     float(rows[k])
+        x2, y2 = float(cols[k + 1]), float(rows[k + 1])
+
+        # Minimum-image offset
+        dx = x2 - x1
+        if   dx >  L / 2: dx -= L
+        elif dx < -L / 2: dx += L
+
+        dy = y2 - y1
+        if   dy >  L / 2: dy -= L
+        elif dy < -L / 2: dy += L
+
+        wraps = (dx != x2 - x1) or (dy != y2 - y1)
+
+        if not wraps:
+            segs[2 * k]     = [(x1, y1), (x2, y2)]
+            segs[2 * k + 1] = [(x1, y1), (x1, y1)]   # degenerate placeholder
+        else:
+            # Each endpoint gets a half-segment exiting 0.5 units past its edge
+            segs[2 * k]     = [(x1, y1), (x1 + 0.5 * dx, y1 + 0.5 * dy)]
+            segs[2 * k + 1] = [(x2, y2), (x2 - 0.5 * dx, y2 - 0.5 * dy)]
+
+    return segs
+
+
 # ── Combined animation ────────────────────────────────────────────────────────
 
 def animate_combined(sim: PolymerKawasaki,
@@ -125,11 +172,13 @@ def animate_combined(sim: PolymerKawasaki,
     ax_lat.tick_params(labelsize=7)
     ax_lat.set_title("Polymer backbone  (colour = monomer index)", fontsize=11, pad=6)
 
-    # Backbone bonds as a LineCollection coloured along the chain
+    # Backbone bonds – periodic-boundary-aware segments
+    # Each bond k→k+1 produces 2 entries (see _bond_segments_periodic).
+    # Colours are duplicated to match.
     rows, cols = sim.get_backbone_coords()
-    pts       = np.column_stack([cols.astype(float), rows.astype(float)])
-    segments  = np.stack([pts[:-1], pts[1:]], axis=1)
-    seg_colors = plt.cm.plasma(np.linspace(0, 1, N - 1))
+    bond_base_colors = plt.cm.plasma(np.linspace(0, 1, N - 1))
+    seg_colors = np.repeat(bond_base_colors, 2, axis=0)   # shape (2*(N-1), 4)
+    segments = _bond_segments_periodic(rows, cols, L)
     lc = LineCollection(segments, colors=seg_colors, linewidths=2.5, zorder=2)
     ax_lat.add_collection(lc)
 
@@ -169,11 +218,9 @@ def animate_combined(sim: PolymerKawasaki,
         # Update monomer circle colours
         sc.set_array(sim.lattice.ravel().astype(float))
 
-        # Update backbone bond segments
+        # Update backbone bond segments (periodic wrapping handled)
         r, c = sim.get_backbone_coords()
-        new_pts  = np.column_stack([c.astype(float), r.astype(float)])
-        new_segs = np.stack([new_pts[:-1], new_pts[1:]], axis=1)
-        lc.set_segments(new_segs)
+        lc.set_segments(_bond_segments_periodic(r, c, L))
 
         sweep_text.set_text(f"Sweep: {sim.sweep}")
 
