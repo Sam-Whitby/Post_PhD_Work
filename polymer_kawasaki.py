@@ -214,7 +214,7 @@ class PolymerKawasaki:
         self.N = N
         self.J = J_matrix.copy()
         self.T = T
-        self.beta = 1.0 / T
+        self.beta = 1.0 / T if T > 0.0 else np.inf
         self.rng = np.random.default_rng(seed)
         self.sweep = 0
         self.K = K

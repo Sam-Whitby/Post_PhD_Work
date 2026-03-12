@@ -46,7 +46,7 @@ from polymer_kawasaki import (
 
 # ── Parameters ────────────────────────────────────────────────────────────────
 L                = 8      # lattice side (must be power of 2)
-J_BACKBONE       = 1.0    # coupling strength along the backbone
+J_BACKBONE       = 0.0    # backbone bond coupling (>0 adds extra attraction when backbone monomers are adjacent)
 E1               = 0.0    # attraction for non-backbone orthogonal contacts (dist=1)
 E2               = 0.0    # attraction for non-backbone diagonal contacts  (dist=√2)
 T                = 1.0    # temperature in units of k_B
