@@ -28,9 +28,10 @@ from polymer_kawasaki import (
 # ── Parameters ────────────────────────────────────────────────────────────────
 L                = 8      # lattice side (must be power of 2)
 J_BACKBONE       = 1.0    # coupling strength along the backbone
-T                = 1.0    # temperature in units of J/k_B
+T                = 1.0    # temperature in units of k_B
 SEED             = 42
-ENFORCE_BACKBONE = True   # hard-reject swaps that stretch any backbone bond > √2
+K                = 10.0   # harmonic spring constant for backbone bonds (V = K * dist²)
+                           # large K → chain stays compact; K = 0 → no bond penalty
 
 N_FRAMES         = 300    # animation frames
 SWEEPS_PER_FRAME = 2      # MC sweeps between frames
@@ -244,14 +245,9 @@ def animate_combined(sim: PolymerKawasaki,
 def main() -> None:
     N = L * L
     print(f"Lattice: {L}×{L}  ({N} monomers)")
-    print(f"T = {T},  J_backbone = {J_BACKBONE}")
+    print(f"T = {T},  J_backbone = {J_BACKBONE},  K = {K}")
 
-    # When enforcing the backbone hard constraint the explicit J coupling
-    # is set to zero: all valid configurations are energetically equivalent
-    # so the energy observable should stay exactly 0 throughout the run.
-    J_matrix = (backbone_coupling_matrix(N, J=J_BACKBONE)
-                if not ENFORCE_BACKBONE
-                else np.zeros((N, N)))
+    J_matrix = backbone_coupling_matrix(N, J=J_BACKBONE)
     moore_coords = generate_moore_curve(order=round(np.log2(L)))
 
     print(f"\nMoore curve spans rows 0–{max(r for r,c in moore_coords)}, "
@@ -265,12 +261,10 @@ def main() -> None:
 
     # ── Run simulation ────────────────────────────────────────────────────
     sim = PolymerKawasaki(L=L, J_matrix=J_matrix, T=T, seed=SEED,
-                          init="moore", enforce_backbone=ENFORCE_BACKBONE)
+                          init="moore", K=K)
 
     E0 = sim.energy()
     print(f"\nInitial energy: {E0:.2f}")
-    if ENFORCE_BACKBONE:
-        print("Backbone hard constraint ON – energy should remain 0 throughout.")
 
     print("\nStarting animation …  (close the window to exit)")
     ani = animate_combined(sim)   # keep reference – prevents GC

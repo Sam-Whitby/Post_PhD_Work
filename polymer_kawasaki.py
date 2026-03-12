@@ -8,18 +8,18 @@ lattice sites.
 
 Hamiltonian:
     H = -sum_{<r, r'>} J_matrix[sigma(r), sigma(r')]
+      + K * sum_{k=0}^{N-2} dist²(k, k+1)
 
-where <r,r'> denotes a nearest-neighbour pair (Moore / 8-neighbour) and
-sigma(r) is the monomer index at site r.
+where <r,r'> denotes a nearest-neighbour pair (Moore / 8-neighbour),
+sigma(r) is the monomer index at site r, and dist(k, k+1) is the
+minimum-image Euclidean distance between consecutive backbone monomers.
+
+The harmonic term V = K * dist² penalises stretched backbone bonds.
+When K is large only bonds at distance 1 (or √2) survive; when K = 0
+all conformations are equally weighted by the J coupling alone.
 
 Kawasaki move: swap two neighbouring monomers.  The identity of each monomer
 is conserved; only their spatial positions change.
-
-Typical use: backbone-only coupling  J_matrix[k, k±1] = J (all other entries
-zero).  Then H is minimised when as many consecutive backbone monomers as
-possible are spatially adjacent – i.e. the polymer is in a compact, path-
-filling conformation.  Starting from a Moore space-filling curve (which
-achieves this minimum) lets you study how the polymer unfolds with temperature.
 """
 
 from __future__ import annotations
@@ -136,21 +136,21 @@ class PolymerKawasaki:
         T: float = 1.0,
         seed: Optional[int] = None,
         init: str = "moore",
-        enforce_backbone: bool = False,
+        K: float = 0.0,
     ):
         """
         Parameters
         ----------
-        L                : lattice side length (must be a power of 2 for init='moore')
-        J_matrix         : N×N coupling matrix  (N = L²)
-        T                : temperature in units of J / k_B
-        seed             : RNG seed for reproducibility
-        init             : 'moore'  – place monomers along the Moore space-filling curve
-                           'random' – random permutation of monomer labels
-        enforce_backbone : if True, hard-reject any swap that would place consecutive
-                           backbone monomers (k, k+1) more than √2 apart.  This acts
-                           as an infinite repulsion for stretched bonds, keeping the
-                           polymer chain intact at all times.
+        L        : lattice side length (must be a power of 2 for init='moore')
+        J_matrix : N×N coupling matrix  (N = L²)
+        T        : temperature in units of k_B
+        seed     : RNG seed for reproducibility
+        init     : 'moore'  – place monomers along the Moore space-filling curve
+                   'random' – random permutation of monomer labels
+        K        : harmonic spring constant for backbone bonds.
+                   Adds V = K * dist²(k, k+1) for each consecutive backbone pair,
+                   using minimum-image distances.  Large K keeps the chain compact;
+                   K = 0 disables the harmonic term entirely.
         """
         N = L * L
         if J_matrix.shape != (N, N):
@@ -165,7 +165,7 @@ class PolymerKawasaki:
         self.beta = 1.0 / T
         self.rng = np.random.default_rng(seed)
         self.sweep = 0
-        self.enforce_backbone = enforce_backbone
+        self.K = K
 
         # lattice[i, j] = monomer index
         self.lattice = np.empty((L, L), dtype=int)
@@ -190,14 +190,23 @@ class PolymerKawasaki:
     # ── Observables ────────────────────────────────────────────────────────
 
     def energy(self) -> float:
-        """Total energy – vectorised, sums over all 8-neighbour bond directions."""
+        """Total energy: J-coupling term + harmonic backbone bonds."""
         lat = self.lattice
         e = 0.0
+        # J-coupling: sum over 4 unique bond directions (no double counting)
         for di, dj in [(0, 1), (1, 0), (1, 1), (1, -1)]:
             lat_shift = np.roll(np.roll(lat, -di, axis=0), -dj, axis=1)
             k1 = lat.ravel()
             k2 = lat_shift.ravel()
             e -= float(np.sum(self.J[k1, k2]))
+        # Harmonic backbone: V = K * dist²(k, k+1) for each bond along the chain
+        if self.K != 0.0:
+            pos = self._pos
+            L = self.L
+            for k in range(self.N - 1):
+                dr = abs(int(pos[k, 0]) - int(pos[k + 1, 0])); dr = min(dr, L - dr)
+                dc = abs(int(pos[k, 1]) - int(pos[k + 1, 1])); dc = min(dc, L - dc)
+                e += self.K * (dr * dr + dc * dc)
         return e
 
     def get_backbone_coords(self) -> tuple[np.ndarray, np.ndarray]:
@@ -207,59 +216,28 @@ class PolymerKawasaki:
         """
         return self._pos[:, 0].copy(), self._pos[:, 1].copy()
 
-    # ── Backbone constraint ────────────────────────────────────────────────
-
-    def _backbone_swap_valid(self, i1: int, j1: int, i2: int, j2: int,
-                              a: int, b: int) -> bool:
-        """
-        Return True iff swapping monomers a (at i1,j1) ↔ b (at i2,j2) keeps
-        every backbone bond (k, k+1) within distance √2 (i.e. dist² ≤ 2).
-
-        Only bonds touching a or b can change.  The bond between a and b
-        itself is unaffected (the two monomers simply exchange positions so
-        the distance is unchanged).
-
-        Distances use the minimum-image convention for periodic boundaries.
-        """
-        L = self.L
-        N = self.N
-        pos = self._pos
-
-        def row(k: int) -> int:
-            return i2 if k == a else (i1 if k == b else int(pos[k, 0]))
-
-        def col(k: int) -> int:
-            return j2 if k == a else (j1 if k == b else int(pos[k, 1]))
-
-        def bond_ok(k1: int, k2: int) -> bool:
-            dr = abs(row(k1) - row(k2)); dr = min(dr, L - dr)
-            dc = abs(col(k1) - col(k2)); dc = min(dc, L - dc)
-            return dr * dr + dc * dc <= 2   # ≤ (√2)²
-
-        if a > 0     and not bond_ok(a - 1, a):  return False
-        if a < N - 1 and not bond_ok(a, a + 1):  return False
-        if b > 0     and not bond_ok(b - 1, b):  return False
-        if b < N - 1 and not bond_ok(b, b + 1):  return False
-        return True
-
     # ── Monte Carlo ────────────────────────────────────────────────────────
 
     def _delta_energy(self, i1: int, j1: int, i2: int, j2: int) -> float:
         """
         Exact energy change for swapping monomers at (i1,j1) and (i2,j2).
 
-        With H = -Σ J[σ(r),σ(r')], swapping monomers a ↔ b gives:
+        Two contributions:
 
-            ΔE = Σ_{r'≠(i2,j2), adj (i1,j1)} [J(a,c) - J(b,c)]
-               + Σ_{r'≠(i1,j1), adj (i2,j2)} [J(b,c) - J(a,c)]
+        1. J-coupling:
+            ΔE_J = Σ_{adj (i1,j1), ≠(i2,j2)} [J(a,c) - J(b,c)]
+                 + Σ_{adj (i2,j2), ≠(i1,j1)} [J(b,c) - J(a,c)]
 
-        where c = σ(r') and J is symmetric.
+        2. Harmonic backbone (K * dist²):
+            Only bonds touching a or b can change.  The bond between a and b
+            itself is unchanged because the two monomers swap positions.
         """
         L = self.L
         lat = self.lattice
         a = int(lat[i1, j1])
         b = int(lat[i2, j2])
 
+        # ── J-coupling part ───────────────────────────────────────────────
         dE = 0.0
         offsets = [(-1, -1), (-1, 0), (-1, 1),
                    ( 0, -1),          ( 0, 1),
@@ -279,6 +257,38 @@ class PolymerKawasaki:
             c = int(lat[ni, nj])
             dE += self.J[b, c] - self.J[a, c]
 
+        # ── Harmonic backbone part ────────────────────────────────────────
+        if self.K != 0.0:
+            N = self.N
+            pos = self._pos
+
+            def new_r(k: int) -> int:
+                return i2 if k == a else (i1 if k == b else int(pos[k, 0]))
+
+            def new_c(k: int) -> int:
+                return j2 if k == a else (j1 if k == b else int(pos[k, 1]))
+
+            def d2_old(k1: int, k2: int) -> int:
+                dr = abs(int(pos[k1, 0]) - int(pos[k2, 0])); dr = min(dr, L - dr)
+                dc = abs(int(pos[k1, 1]) - int(pos[k2, 1])); dc = min(dc, L - dc)
+                return dr * dr + dc * dc
+
+            def d2_new(k1: int, k2: int) -> int:
+                dr = abs(new_r(k1) - new_r(k2)); dr = min(dr, L - dr)
+                dc = abs(new_c(k1) - new_c(k2)); dc = min(dc, L - dc)
+                return dr * dr + dc * dc
+
+            bonds: set = set()
+            if a > 0:     bonds.add((a - 1, a))
+            if a < N - 1: bonds.add((a, a + 1))
+            if b > 0:     bonds.add((b - 1, b))
+            if b < N - 1: bonds.add((b, b + 1))
+
+            for k1, k2 in bonds:
+                if {k1, k2} == {a, b}:
+                    continue  # swap preserves this distance
+                dE += self.K * (d2_new(k1, k2) - d2_old(k1, k2))
+
         return dE
 
     def step(self) -> int:
@@ -291,8 +301,6 @@ class PolymerKawasaki:
         rng = self.rng
         beta = self.beta
         n_accepted = 0
-
-        check_bb = self.enforce_backbone
         pos = self._pos
 
         for _ in range(L * L):
@@ -306,10 +314,6 @@ class PolymerKawasaki:
 
             a = int(lat[i1, j1])
             b = int(lat[i2, j2])
-
-            # Hard backbone constraint: reject if any bond would stretch > √2
-            if check_bb and not self._backbone_swap_valid(i1, j1, i2, j2, a, b):
-                continue
 
             dE = self._delta_energy(i1, j1, i2, j2)
 
