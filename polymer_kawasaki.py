@@ -136,16 +136,21 @@ class PolymerKawasaki:
         T: float = 1.0,
         seed: Optional[int] = None,
         init: str = "moore",
+        enforce_backbone: bool = False,
     ):
         """
         Parameters
         ----------
-        L        : lattice side length (must be a power of 2 for init='moore')
-        J_matrix : N×N coupling matrix  (N = L²)
-        T        : temperature in units of J / k_B
-        seed     : RNG seed for reproducibility
-        init     : 'moore'  – place monomers along the Moore space-filling curve
-                   'random' – random permutation of monomer labels
+        L                : lattice side length (must be a power of 2 for init='moore')
+        J_matrix         : N×N coupling matrix  (N = L²)
+        T                : temperature in units of J / k_B
+        seed             : RNG seed for reproducibility
+        init             : 'moore'  – place monomers along the Moore space-filling curve
+                           'random' – random permutation of monomer labels
+        enforce_backbone : if True, hard-reject any swap that would place consecutive
+                           backbone monomers (k, k+1) more than √2 apart.  This acts
+                           as an infinite repulsion for stretched bonds, keeping the
+                           polymer chain intact at all times.
         """
         N = L * L
         if J_matrix.shape != (N, N):
@@ -160,6 +165,7 @@ class PolymerKawasaki:
         self.beta = 1.0 / T
         self.rng = np.random.default_rng(seed)
         self.sweep = 0
+        self.enforce_backbone = enforce_backbone
 
         # lattice[i, j] = monomer index
         self.lattice = np.empty((L, L), dtype=int)
@@ -174,6 +180,12 @@ class PolymerKawasaki:
         else:
             perm = self.rng.permutation(N)
             self.lattice = perm.reshape(L, L)
+
+        # Inverse position map: _pos[k] = (row, col) of monomer k.
+        # Maintained incrementally in step() for O(1) backbone-bond checks.
+        self._pos = np.empty((N, 2), dtype=int)
+        self._pos[self.lattice.ravel(), 0] = np.repeat(np.arange(L), L)
+        self._pos[self.lattice.ravel(), 1] = np.tile(np.arange(L), L)
 
     # ── Observables ────────────────────────────────────────────────────────
 
@@ -193,11 +205,42 @@ class PolymerKawasaki:
         Return (rows, cols) arrays of length N such that
         rows[k], cols[k] is the current lattice position of monomer k.
         """
-        rows = np.empty(self.N, dtype=int)
-        cols = np.empty(self.N, dtype=int)
-        rows[self.lattice.ravel()] = np.repeat(np.arange(self.L), self.L)
-        cols[self.lattice.ravel()] = np.tile(np.arange(self.L), self.L)
-        return rows, cols
+        return self._pos[:, 0].copy(), self._pos[:, 1].copy()
+
+    # ── Backbone constraint ────────────────────────────────────────────────
+
+    def _backbone_swap_valid(self, i1: int, j1: int, i2: int, j2: int,
+                              a: int, b: int) -> bool:
+        """
+        Return True iff swapping monomers a (at i1,j1) ↔ b (at i2,j2) keeps
+        every backbone bond (k, k+1) within distance √2 (i.e. dist² ≤ 2).
+
+        Only bonds touching a or b can change.  The bond between a and b
+        itself is unaffected (the two monomers simply exchange positions so
+        the distance is unchanged).
+
+        Distances use the minimum-image convention for periodic boundaries.
+        """
+        L = self.L
+        N = self.N
+        pos = self._pos
+
+        def row(k: int) -> int:
+            return i2 if k == a else (i1 if k == b else int(pos[k, 0]))
+
+        def col(k: int) -> int:
+            return j2 if k == a else (j1 if k == b else int(pos[k, 1]))
+
+        def bond_ok(k1: int, k2: int) -> bool:
+            dr = abs(row(k1) - row(k2)); dr = min(dr, L - dr)
+            dc = abs(col(k1) - col(k2)); dc = min(dc, L - dc)
+            return dr * dr + dc * dc <= 2   # ≤ (√2)²
+
+        if a > 0     and not bond_ok(a - 1, a):  return False
+        if a < N - 1 and not bond_ok(a, a + 1):  return False
+        if b > 0     and not bond_ok(b - 1, b):  return False
+        if b < N - 1 and not bond_ok(b, b + 1):  return False
+        return True
 
     # ── Monte Carlo ────────────────────────────────────────────────────────
 
@@ -249,6 +292,9 @@ class PolymerKawasaki:
         beta = self.beta
         n_accepted = 0
 
+        check_bb = self.enforce_backbone
+        pos = self._pos
+
         for _ in range(L * L):
             i1 = int(rng.integers(L))
             j1 = int(rng.integers(L))
@@ -258,10 +304,19 @@ class PolymerKawasaki:
             dj = ( 0,  0,-1,  1, -1,  1, -1,  1)[d]
             i2, j2 = (i1 + di) % L, (j1 + dj) % L
 
+            a = int(lat[i1, j1])
+            b = int(lat[i2, j2])
+
+            # Hard backbone constraint: reject if any bond would stretch > √2
+            if check_bb and not self._backbone_swap_valid(i1, j1, i2, j2, a, b):
+                continue
+
             dE = self._delta_energy(i1, j1, i2, j2)
 
             if dE <= 0 or rng.random() < np.exp(-beta * dE):
                 lat[i1, j1], lat[i2, j2] = lat[i2, j2], lat[i1, j1]
+                pos[a, 0], pos[a, 1] = i2, j2
+                pos[b, 0], pos[b, 1] = i1, j1
                 n_accepted += 1
 
         self.sweep += 1

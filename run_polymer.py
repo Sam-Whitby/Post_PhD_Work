@@ -26,13 +26,14 @@ from polymer_kawasaki import (
 
 
 # ── Parameters ────────────────────────────────────────────────────────────────
-L               = 8      # lattice side (must be power of 2)
-J_BACKBONE      = 1.0    # coupling strength along the backbone
-T               = 1.0    # temperature in units of J/k_B
-SEED            = 42
+L                = 8      # lattice side (must be power of 2)
+J_BACKBONE       = 1.0    # coupling strength along the backbone
+T                = 1.0    # temperature in units of J/k_B
+SEED             = 42
+ENFORCE_BACKBONE = True   # hard-reject swaps that stretch any backbone bond > √2
 
-N_FRAMES        = 300    # animation frames
-SWEEPS_PER_FRAME = 2     # MC sweeps between frames
+N_FRAMES         = 300    # animation frames
+SWEEPS_PER_FRAME = 2      # MC sweeps between frames
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -198,8 +199,12 @@ def main() -> None:
     print(f"Lattice: {L}×{L}  ({N} monomers)")
     print(f"T = {T},  J_backbone = {J_BACKBONE}")
 
-    # Build coupling matrix and initial configuration
-    J_matrix    = backbone_coupling_matrix(N, J=J_BACKBONE)
+    # When enforcing the backbone hard constraint the explicit J coupling
+    # is set to zero: all valid configurations are energetically equivalent
+    # so the energy observable should stay exactly 0 throughout the run.
+    J_matrix = (backbone_coupling_matrix(N, J=J_BACKBONE)
+                if not ENFORCE_BACKBONE
+                else np.zeros((N, N)))
     moore_coords = generate_moore_curve(order=round(np.log2(L)))
 
     print(f"\nMoore curve spans rows 0–{max(r for r,c in moore_coords)}, "
@@ -212,12 +217,13 @@ def main() -> None:
     plot_coupling_matrices(J_matrix, moore_coords)
 
     # ── Run simulation ────────────────────────────────────────────────────
-    sim = PolymerKawasaki(L=L, J_matrix=J_matrix, T=T, seed=SEED, init="moore")
+    sim = PolymerKawasaki(L=L, J_matrix=J_matrix, T=T, seed=SEED,
+                          init="moore", enforce_backbone=ENFORCE_BACKBONE)
 
     E0 = sim.energy()
-    print(f"\nInitial energy: {E0:.2f}  (per site: {E0/N:.4f})")
-    print(f"Maximum possible (all backbone bonds adjacent): "
-          f"{-(N-1)*J_BACKBONE:.2f}")
+    print(f"\nInitial energy: {E0:.2f}")
+    if ENFORCE_BACKBONE:
+        print("Backbone hard constraint ON – energy should remain 0 throughout.")
 
     print("\nStarting animation …  (close the window to exit)")
     ani = animate_combined(sim)   # keep reference – prevents GC
